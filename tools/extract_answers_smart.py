@@ -147,7 +147,7 @@ class QuestionPrompt(object):
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print "USAGE: ./extract_answers.py gh_usernames template_notebook_file"
+        print "USAGE: ./extract_answers_smart.py gh_usernames template_notebook_file"
         sys.exit(-1)
     question_prompts = []
     start = sys.argv[2].find('day')
