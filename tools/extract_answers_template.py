@@ -36,18 +36,20 @@ class NotebookExtractor(object):
         fid.close()
         prompts = []
         prev_prompt = None
-        for c in self.template['cells']:
-            if c['metadata'].get('is_question', 'false') == 'true':
+        for idx, c in enumerate(self.template['cells']):
+            if c['metadata'].get('is_question', False):
                 if prev_prompt is not None:
                     prompts[-1].stop_md = u''.join(c['source'])
                 prompts.append(QuestionPrompt(question_heading=u"",
                                               start_md=u''.join(c['source']),
                                               stop_md=u'next_cell'))
-                if c['metadata'].get('allow_multi_cell', 'false') == 'true':
+                if c['metadata'].get('allow_multi_cell', False):
                     prev_prompt = prompts[-1]
+                    # if it's the last cell, take everything else
+                    if idx + 1 == len(self.template['cells']):
+                        prompts[-1].stop_md = u""
                 else:
                     prev_prompt = None
-
         return prompts
 
     def extract(self):
