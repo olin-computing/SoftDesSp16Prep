@@ -8,6 +8,7 @@
 
 import sys
 import json
+import re
 from multiprocessing import Pool
 from numpy import argmin
 import Levenshtein
@@ -16,8 +17,12 @@ import pandas as pd
 import urllib
 import os
 
-def urljson(url):
-    """Global function so that it can be used as an argument to `p.map`"""
+def read_json_from_url(url):
+    """Given an URL, return its contents as JSON.
+    Prints exceptions, and returns None.
+    
+    This is a global function so that it can be used as an argument to `p.map`"""
+
     fid = urllib.urlopen(url)
     try:
         return json.load(fid)
@@ -68,7 +73,7 @@ class NotebookExtractor(object):
             the questions and answers to the reading.
         """
         p = Pool(20)
-        nbs = dict(zip(self.notebook_URLs, p.map(urljson, self.notebook_URLs)))
+        nbs = dict(zip(self.notebook_URLs, p.map(read_json_from_url, self.notebook_URLs)))
         filtered_cells = []
         for i, prompt in enumerate(self.question_prompts):
             suppress_non_answer = False
@@ -166,6 +171,7 @@ def validate_github_username(gh_name):
     return gh_name if fid.getcode() == 200 else None
 
 def get_user_repo_urls(gh_usernames_path, repo_name="ReadingJournal"):
+    """`gh_usernames_path` is a path to a CSV file with a "gh_username" column"""
     survey_data = pd.read_csv(sys.argv[1])
     github_usernames = survey_data["gh_username"]
     p = Pool(20)
@@ -177,20 +183,21 @@ def get_user_repo_urls(gh_usernames_path, repo_name="ReadingJournal"):
                 .format(username=u, repo_name=repo_name)
             for u in valid_usernames]
 
+def get_user_notebook_urls(user_repo_urls, template_nb_path):
+    m = re.match(r'day(\d+)_', template_nb_path)
+    assert m, "template file must include day\d+_"
+    notebook_number = m.group(1)
+    notebook_filename = "day{}_reading_journal.ipynb".format(notebook_number)
+    return ["{repo_url}/{branch}/{path}".format(repo_url=url, branch="master", path=notebook_filename)
+            for url in user_repo_urls]
+
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
+    if len(sys.argv) != 3:
         print "USAGE: ./extract_answers_template.py gh_users template_nb_file"
         sys.exit(-1)
 
-    repo_urls = get_user_repo_urls(sys.argv[1])
-    template_path = sys.argv[2]
-    start = template_path.find('day')
-    clipped = template_path[start:]
-    stop = clipped.find('_')
-    notebook_number = clipped[3:stop]
-
-    notebook_filename = "day{}_reading_journal.ipynb".format(notebook_number)
-    notebook_urls = ["{repo_url}/{branch}/{path}".format(repo_url=url, branch="master", path=notebook_filename)
-                     for url in repo_urls]
-    nbe = NotebookExtractor(notebook_urls, template_path)
+    user_repo_urls = get_user_repo_urls(sys.argv[1])
+    template_nb_path = sys.argv[2]
+    notebook_urls = get_user_notebook_urls(user_repo_urls, template_nb_path)
+    nbe = NotebookExtractor(notebook_urls, template_nb_path)
     nbe.extract()
