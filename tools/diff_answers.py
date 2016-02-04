@@ -35,7 +35,6 @@ if __name__ == '__main__':
         sys.exit(-1)
 
     user_repo_urls = get_user_repo_urls(sys.argv[1])
-    # user_repo_urls = ['https://raw.githubusercontent.com/Margaretmcrawf/ReadingJournal']
     template_nb_path = sys.argv[2]
     notebook_urls = get_user_notebook_urls(user_repo_urls, template_nb_path)
     with open(template_nb_path) as f:
