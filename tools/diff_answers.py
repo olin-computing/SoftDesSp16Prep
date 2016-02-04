@@ -31,7 +31,7 @@ def cell_is_keeper(cell):
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
-        print "USAGE: ./extract_answers_template.py gh_users template_nb_file"
+        print "USAGE: ./diff_answers.py gh_users.csv template_nb_file"
         sys.exit(-1)
 
     user_repo_urls = get_user_repo_urls(sys.argv[1])
