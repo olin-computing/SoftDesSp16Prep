@@ -8,6 +8,7 @@
 
 import sys
 import json
+from multiprocessing import Pool
 from numpy import argmin
 import Levenshtein
 from copy import deepcopy
@@ -15,6 +16,16 @@ import pandas as pd
 import urllib
 import os
 
+def urljson(url):
+    """Global function so that it can be used as an argument to `p.map`"""
+    fid = urllib.urlopen(url)
+    try:
+        return json.load(fid)
+    except Exception as ex:
+        print "error loading", url, ex
+        return None
+    finally:
+        fid.close()
 
 class NotebookExtractor(object):
     """ The top-level class for extracting answers from a notebook.
@@ -56,15 +67,8 @@ class NotebookExtractor(object):
         """ Filter the notebook at the notebook_URL so that it only contains
             the questions and answers to the reading.
         """
-        nbs = {}
-        for url in self.notebook_URLs:
-            fid = urllib.urlopen(url)
-            try:
-                nbs[url] = json.load(fid)
-            except Exception as ex:
-                print "error loading", url, ex
-                nbs[url] = None
-            fid.close()
+        p = Pool(20)
+        nbs = dict(zip(self.notebook_URLs, p.map(urljson, self.notebook_URLs)))
         filtered_cells = []
         for i, prompt in enumerate(self.question_prompts):
             suppress_non_answer = False
@@ -154,33 +158,39 @@ class QuestionPrompt(object):
         return_value.extend(cells[best_match+1:best_match+end_offset])
         return return_value
 
+def validate_github_username(gh_name):
+    """Return gh_name if that user has a `repo_name` repository, else None"""
+    fid = urllib.urlopen("http://github.com/" + gh_name)
+    page = fid.readlines()
+    fid.close()
+    return gh_name if fid.getcode() == 200 else None
+
+def get_user_repo_urls(gh_usernames_path, repo_name="ReadingJournal"):
+    survey_data = pd.read_csv(sys.argv[1])
+    github_usernames = survey_data["gh_username"]
+    p = Pool(20)
+    valid_usernames = filter(None, p.map(validate_github_username, github_usernames))
+    invalid_usernames = set(github_usernames) - set(valid_usernames)
+    if invalid_usernames:
+        print "Invalid github username(s):", invalid_usernames
+    return ["https://raw.githubusercontent.com/{username}/{repo_name}"
+                .format(username=u, repo_name=repo_name)
+            for u in valid_usernames]
+
 if __name__ == '__main__':
     if len(sys.argv) < 3:
         print "USAGE: ./extract_answers_template.py gh_users template_nb_file"
         sys.exit(-1)
-    question_prompts = []
-    start = sys.argv[2].find('day')
-    clipped = sys.argv[2][start:]
+
+    repo_urls = get_user_repo_urls(sys.argv[1])
+    template_path = sys.argv[2]
+    start = template_path.find('day')
+    clipped = template_path[start:]
     stop = clipped.find('_')
     notebook_number = clipped[3:stop]
 
-    survey_data = pd.read_csv(sys.argv[1])
-    github_usernames = survey_data["gh_username"]
-    is_valid = []
-    for gh_name in github_usernames:
-        fid = urllib.urlopen("http://github.com/" + gh_name)
-        page = fid.readlines()
-        is_valid.append(fid.getcode() == 200)
-
-        if not is_valid[-1]:
-            print "Invalid github username", gh_name
-
-    urls = []
-    survey_data['valid_github'] = is_valid
-    valid_users = survey_data[survey_data.valid_github]["gh_username"]
-    urls = ["https://raw.githubusercontent.com/" +
-            u + "/ReadingJournal/master/day" +
-            notebook_number +
-            "_reading_journal.ipynb" for u in valid_users]
-    nbe = NotebookExtractor(urls, sys.argv[2])
+    notebook_filename = "day{}_reading_journal.ipynb".format(notebook_number)
+    notebook_urls = ["{repo_url}/{branch}/{path}".format(repo_url=url, branch="master", path=notebook_filename)
+                     for url in repo_urls]
+    nbe = NotebookExtractor(notebook_urls, template_path)
     nbe.extract()
