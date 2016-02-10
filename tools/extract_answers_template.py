@@ -78,6 +78,7 @@ class NotebookExtractor(object):
         filtered_cells = []
         for i, prompt in enumerate(self.question_prompts):
             suppress_non_answer = False
+            answer_strings = set([])  # answers to this question, as strings; used to avoid duplicates
             for j, url in enumerate(nbs):
                 if nbs[url] is None:
                     continue
@@ -90,8 +91,11 @@ class NotebookExtractor(object):
                 elif not response_cells[-1]['source']:
                     print "Blank", prompt.question_heading, " for ", url
                 else:
-                    filtered_cells.extend(response_cells)
-                    suppress_non_answer = True
+                    answer_string = "\n".join("".join(cell['source']) for cell in response_cells).strip()
+                    if answer_string not in answer_strings:
+                        answer_strings.add(answer_string)
+                        filtered_cells.extend(response_cells)
+                        suppress_non_answer = True
 
         leading, nb_name_full = os.path.split(self.notebook_URLs[0])
         nb_name_stem, extension = os.path.splitext(nb_name_full)
