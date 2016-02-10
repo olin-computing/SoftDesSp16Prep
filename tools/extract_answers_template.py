@@ -20,17 +20,18 @@ import os
 def read_json_from_url(url):
     """Given an URL, return its contents as JSON.
     Prints exceptions, and returns None.
-    
+
     This is a global function so that it can be used as an argument to `p.map`"""
 
     fid = urllib.urlopen(url)
     try:
         return json.load(fid)
     except Exception as ex:
-        print "error loading", url, ex
+        print "error loading {}: {}".format(url, ex)
         return None
     finally:
         fid.close()
+
 
 class NotebookExtractor(object):
     """ The top-level class for extracting answers from a notebook.
@@ -95,12 +96,11 @@ class NotebookExtractor(object):
         leading, nb_name_full = os.path.split(self.notebook_URLs[0])
         nb_name_stem, extension = os.path.splitext(nb_name_full)
 
-        fid = open(nb_name_stem + "_responses.ipynb", 'wt')
-
-        answer_book = deepcopy(self.template)
-        answer_book['cells'] = filtered_cells
-        json.dump(answer_book, fid)
-        fid.close()
+        output_dir = os.path.join(os.path.dirname(__file__), "../processed_notebooks")
+        with open(os.path.join(output_dir, nb_name_stem + "_responses.ipynb"), 'wt') as fid:
+            answer_book = deepcopy(self.template)
+            answer_book['cells'] = filtered_cells
+            json.dump(answer_book, fid)
 
     @staticmethod
     def markdown_heading_cell(text, heading_level):
@@ -184,8 +184,8 @@ def get_user_repo_urls(gh_usernames_path, repo_name="ReadingJournal"):
             for u in valid_usernames]
 
 def get_user_notebook_urls(user_repo_urls, template_nb_path):
-    m = re.match(r'day(\d+)_', template_nb_path)
-    assert m, "template file must include day\d+_"
+    m = re.match(r'.+day(\d+)_.+', template_nb_path)
+    assert m, "template filename must include day\d+_"
     notebook_number = m.group(1)
     notebook_filename = "day{}_reading_journal.ipynb".format(notebook_number)
     return ["{repo_url}/{branch}/{path}".format(repo_url=url, branch="master", path=notebook_filename)
