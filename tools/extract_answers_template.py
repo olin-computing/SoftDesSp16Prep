@@ -184,7 +184,8 @@ def get_user_repo_urls(gh_usernames_path, repo_name="ReadingJournal"):
             for u in valid_usernames]
 
 def get_user_notebook_urls(user_repo_urls, template_nb_path):
-    m = re.match(r'day(\d+)_', template_nb_path)
+    m = re.match(r'.*day(\d+)_', template_nb_path)
+    print template_nb_path
     assert m, "template file must include day\d+_"
     notebook_number = m.group(1)
     notebook_filename = "day{}_reading_journal.ipynb".format(notebook_number)
