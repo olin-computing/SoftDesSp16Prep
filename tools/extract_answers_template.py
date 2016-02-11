@@ -20,17 +20,18 @@ import os
 def read_json_from_url(url):
     """Given an URL, return its contents as JSON.
     Prints exceptions, and returns None.
-    
+
     This is a global function so that it can be used as an argument to `p.map`"""
 
     fid = urllib.urlopen(url)
     try:
         return json.load(fid)
     except Exception as ex:
-        print "error loading", url, ex
+        print "error loading {}: {}".format(url, ex)
         return None
     finally:
         fid.close()
+
 
 class NotebookExtractor(object):
     """ The top-level class for extracting answers from a notebook.
@@ -77,6 +78,7 @@ class NotebookExtractor(object):
         filtered_cells = []
         for i, prompt in enumerate(self.question_prompts):
             suppress_non_answer = False
+            answer_strings = set([])  # answers to this question, as strings; used to avoid duplicates
             for j, url in enumerate(nbs):
                 if nbs[url] is None:
                     continue
@@ -89,18 +91,20 @@ class NotebookExtractor(object):
                 elif not response_cells[-1]['source']:
                     print "Blank", prompt.question_heading, " for ", url
                 else:
-                    filtered_cells.extend(response_cells)
-                    suppress_non_answer = True
+                    answer_string = "\n".join("".join(cell['source']) for cell in response_cells).strip()
+                    if answer_string not in answer_strings:
+                        answer_strings.add(answer_string)
+                        filtered_cells.extend(response_cells)
+                        suppress_non_answer = True
 
         leading, nb_name_full = os.path.split(self.notebook_URLs[0])
         nb_name_stem, extension = os.path.splitext(nb_name_full)
 
-        fid = open(nb_name_stem + "_responses.ipynb", 'wt')
-
-        answer_book = deepcopy(self.template)
-        answer_book['cells'] = filtered_cells
-        json.dump(answer_book, fid)
-        fid.close()
+        output_dir = os.path.join(os.path.dirname(__file__), "../processed_notebooks")
+        with open(os.path.join(output_dir, nb_name_stem + "_responses.ipynb"), 'wt') as fid:
+            answer_book = deepcopy(self.template)
+            answer_book['cells'] = filtered_cells
+            json.dump(answer_book, fid)
 
     @staticmethod
     def markdown_heading_cell(text, heading_level):
