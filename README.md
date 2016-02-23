@@ -16,7 +16,12 @@ their respones.
 Take a student notebook and the starter assignment notebook and return the diff, but separated per problem.
 This lets us see at a glance that the student answered something for each problem.
 
+    ./tools/prettypatch_pull_requests.py GITHUB_USER GITHUB_REPO
+
 ## Install
 
     pip install -r requirements.txt
+
+(`summarize_pull_request_patches.py` only:)
+Set `HOMEBREW_GITHUB_API_TOKEN` to avoid Github's rate limit.
 

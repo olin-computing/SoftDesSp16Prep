@@ -5,6 +5,7 @@
     and builds a notebook which summarizes the responses to each question.
 """
 
+import argparse
 import json
 import re
 from multiprocessing import Pool
@@ -209,7 +210,6 @@ def get_user_notebook_urls(user_repo_urls, template_nb_path):
             for url in user_repo_urls]
 
 if __name__ == '__main__':
-    import argparse
     parser = argparse.ArgumentParser(description='Summarize a set of Jupyter notebooks.')
     parser.add_argument('--include-usernames', action='store_true', help='include user names in the summary notebook')
     parser.add_argument('gh_users', type=str, metavar='GH_USERNAME_CSV_FILE')
