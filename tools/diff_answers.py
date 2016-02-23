@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 
-# Take a student notebook and the starter assignment notebook and return the diff, but separated per problem. This will
-# let us see at a glance that the student answered something for each problem and greatly speed up the check-off
-# process.
+# Take a student notebook and the starter assignment notebook and return the diff, but separated per problem. This
+# lets us see at a glance that the student answered something for each problem.
 
 import json
 import os
