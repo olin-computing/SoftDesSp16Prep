@@ -18,10 +18,17 @@ This lets us see at a glance that the student answered something for each proble
 
     ./tools/prettypatch_pull_requests.py GITHUB_USER GITHUB_REPO
 
+Create a directory `build/${GITHUB_REPO}` that contains the diff, in patch format and colorized HTML,
+of each pull request.
+
+This command assumes there only pull request per repository.
+
 ## Install
 
     pip install -r requirements.txt
 
-(`summarize_pull_request_patches.py` only:)
+To enable `prettypatch_pull_requests.py`:
+
 Set `HOMEBREW_GITHUB_API_TOKEN` to avoid Github's rate limit.
 
+Install Ruby.
