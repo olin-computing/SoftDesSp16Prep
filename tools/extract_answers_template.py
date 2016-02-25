@@ -48,9 +48,10 @@ class NotebookExtractor(object):
         self.include_usernames = include_usernames
 
     def build_question_prompts(self, notebook_template_file):
-        fid = open(notebook_template_file, 'r')
-        self.template = json.load(fid)
-        fid.close()
+        """Returns a list of `QuestionPrompt`. Each cell with metadata `is_question` truthy
+        produces an instance of `QuestionPrompt`."""
+        with open(notebook_template_file, 'r') as fid:
+            self.template = json.load(fid)
         prompts = []
         prev_prompt = None
         for idx, c in enumerate(self.template['cells']):
@@ -59,7 +60,9 @@ class NotebookExtractor(object):
                     prompts[-1].stop_md = u''.join(c['source'])
                 prompts.append(QuestionPrompt(question_heading=u"",
                                               start_md=u''.join(c['source']),
-                                              stop_md=u'next_cell'))
+                                              stop_md=u'next_cell',
+                                              is_poll=c['metadata'].get('is_poll', False)
+                                              ))
                 if c['metadata'].get('allow_multi_cell', False):
                     prev_prompt = prompts[-1]
                     # if it's the last cell, take everything else
@@ -73,10 +76,13 @@ class NotebookExtractor(object):
         """ Filter the notebook at the notebook_URL so that it only contains
             the questions and answers to the reading.
         """
-        p = Pool(20)
+        p = Pool(20)  # HTTP fetch parallelism. This nuber is empirically good.
         print "Retrieving", len(self.notebook_URLs), "notebooks"
         nbs = zip(self.notebook_URLs, p.map(read_json_from_url, self.notebook_URLs))
+        # `nbs` is a list of pairs of (url, json)
         if self.include_usernames:
+            # Sort by username iff including the usernames in the output.
+            # This makes it easier to find students.
             nbs = sorted(nbs, key=lambda t: t[0].lower())
         filtered_cells = []
         for prompt in self.question_prompts:
@@ -99,7 +105,9 @@ class NotebookExtractor(object):
                         gh_username = url.split('/')[3]  # TODO pass the student name here
                         title = "#### " + gh_username
                         filtered_cells.append({'cell_type': 'markdown', 'source': [title], 'metadata': {}})
-                    elif answer_string in answer_strings:
+                    elif not answer_string:
+                        continue
+                    elif not prompt.is_poll and answer_string in answer_strings:
                         continue
                     answer_strings.add(answer_string)
                     filtered_cells.extend(response_cells)
@@ -129,7 +137,7 @@ class NotebookExtractor(object):
 
 
 class QuestionPrompt(object):
-    def __init__(self, question_heading, start_md, stop_md):
+    def __init__(self, question_heading, start_md, stop_md, is_poll=False):
         """ Initialize a question prompt with the specified
             starting markdown (the question), and stopping
             markdown (the markdown from the next content
@@ -142,6 +150,7 @@ class QuestionPrompt(object):
         self.question_heading = question_heading
         self.start_md = start_md
         self.stop_md = stop_md
+        self.is_poll = is_poll
 
     def get_closest_match(self,
                           cells,
