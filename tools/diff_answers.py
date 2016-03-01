@@ -45,8 +45,10 @@ if __name__ == '__main__':
     for notebook_url, nb in zip(notebook_urls, p.map(read_json_from_url, notebook_urls)):
         if not nb:
             continue
-        github_username = notebook_url.split('/')[3]  # TODO preserve the name from the list of users
-        nb['cells'] = [cell for cell in nb['cells'] if get_cell_eq_key(cell) not in template_cell_indices]
+        # TODO preserve the name from the list of users
+        github_username = notebook_url.split('/')[3]
+        nb['cells'] = [cell for cell in nb['cells']
+                       if get_cell_eq_key(cell) not in template_cell_indices]
         root, ext = os.path.splitext(os.path.basename(template_nb_path))
         output_path = 'processed_notebooks/{}_{}{}'.format(root, github_username, ext)
         print 'writing', output_path
