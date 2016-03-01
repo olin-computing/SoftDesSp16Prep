@@ -50,27 +50,32 @@ class NotebookExtractor(object):
         self.notebook_URLs = notebook_URLs
         self.question_prompts = self.build_question_prompts(notebook_template_file)
         self.include_usernames = include_usernames
+        leading, nb_name_full = os.path.split(self.notebook_URLs[0])
+        self.nb_name_stem, _ = os.path.splitext(nb_name_full)
 
     def build_question_prompts(self, notebook_template_file):
         """Returns a list of `QuestionPrompt`. Each cell with metadata `is_question` truthy
         produces an instance of `QuestionPrompt`."""
         with open(notebook_template_file, 'r') as fid:
             self.template = json.load(fid)
+
         prompts = []
         prev_prompt = None
-        for idx, c in enumerate(self.template['cells']):
-            if c['metadata'].get('is_question', False):
+        for idx, cell in enumerate(self.template['cells']):
+            is_final_cell = idx + 1 == len(self.template['cells'])
+            metadata = cell['metadata']
+            if metadata.get('is_question', False):
                 if prev_prompt is not None:
-                    prompts[-1].stop_md = u''.join(c['source'])
+                    prompts[-1].stop_md = u''.join(cell['source'])
                 prompts.append(QuestionPrompt(question_heading=u"",
-                                              start_md=u''.join(c['source']),
+                                              start_md=u''.join(cell['source']),
                                               stop_md=u'next_cell',
-                                              is_poll=c['metadata'].get('is_poll', False)
+                                              is_poll=metadata.get('is_poll', False)
                                               ))
-                if c['metadata'].get('allow_multi_cell', False):
+                if metadata.get('allow_multi_cell', False):
                     prev_prompt = prompts[-1]
                     # if it's the last cell, take everything else
-                    if idx + 1 == len(self.template['cells']):
+                    if is_final_cell:
                         prompts[-1].stop_md = u""
                 else:
                     prev_prompt = None
@@ -95,6 +100,12 @@ class NotebookExtractor(object):
         """
 
         nbs = self.fetch_notebooks()
+        self.usernames = nbs.keys()
+
+        users_missing_notebooks = [u for u, notebook_content in nbs.items() if not notebook_content]
+        if users_missing_notebooks:
+            print "Users missing notebooks:", ', '.join(users_missing_notebooks)
+
         if self.include_usernames:
             # Sort by username iff including the usernames in the output.
             # This makes it easier to find students.
@@ -127,6 +138,19 @@ class NotebookExtractor(object):
                     else:
                         answer_strings.add(answer_string)
 
+        sort_responses = not self.include_usernames
+        sort_responses = False  # FIXME doesn't work because questions are collected into first response
+        if sort_responses:
+            def cell_slines_length(response_cells):
+                return len("\n".join("".join(cell['source']) for cell in response_cells).strip())
+            for prompt in self.question_prompts:
+                prompt.answers = OrderedDict(sorted(prompt.answers.items(), key=lambda t: cell_slines_length(t[1])))
+
+    def write_notebook(self):
+        output_dir = os.path.join(os.path.dirname(__file__), "../processed_notebooks")
+        suffix = "_responses_with_names" if self.include_usernames else "_responses"
+        output_file = os.path.join(output_dir, self.nb_name_stem + suffix + ".ipynb")
+
         filtered_cells = []
         for prompt in self.question_prompts:
             for gh_username, response_cells in prompt.answers.items():
@@ -134,18 +158,24 @@ class NotebookExtractor(object):
                     title = "#### " + gh_username
                     filtered_cells.append({'cell_type': 'markdown', 'source': [title], 'metadata': {}})
                 filtered_cells.extend(response_cells)
+        answer_book = deepcopy(self.template)
+        answer_book['cells'] = filtered_cells
 
-        leading, nb_name_full = os.path.split(self.notebook_URLs[0])
-        nb_name_stem, extension = os.path.splitext(nb_name_full)
-
-        output_dir = os.path.join(os.path.dirname(__file__), "../processed_notebooks")
-        suffix = "_responses_with_names" if self.include_usernames else "_responses"
-        output_file = os.path.join(output_dir, nb_name_stem + suffix + ".ipynb")
         print "Writing", output_file
         with open(output_file, 'wt') as fid:
-            answer_book = deepcopy(self.template)
-            answer_book['cells'] = filtered_cells
             json.dump(answer_book, fid)
+
+    def write_answer_counts(self):
+        dataset = [[u in prompt.answers for u in self.usernames] for prompt in self.question_prompts]
+        df = pd.DataFrame(data=dataset, columns=self.usernames)
+        df.index = range(1, 1 + len(dataset))
+        df.sort_index(axis=1, inplace=True)
+        df['Total'] = df.sum(axis=1)
+        df = pd.concat([df, pd.DataFrame(df.sum(axis=0).astype(int), columns=['Total']).T])
+
+        output_file = os.path.join('processed_notebooks', '%s-answer-counts.csv' % self.nb_name_stem)
+        print "Writing", output_file
+        df.to_csv(output_file)
 
     @staticmethod
     def markdown_heading_cell(text, heading_level):
@@ -263,3 +293,5 @@ if __name__ == '__main__':
     notebook_urls = [get_github_user_notebook_url(u, template_nb_path, repo_name) for u in github_usernames]
     nbe = NotebookExtractor(notebook_urls, template_nb_path, include_usernames=args.include_usernames)
     nbe.extract()
+    nbe.write_notebook()
+    nbe.write_answer_counts()
