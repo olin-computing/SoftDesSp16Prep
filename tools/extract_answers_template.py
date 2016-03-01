@@ -98,15 +98,13 @@ class NotebookExtractor(object):
         if self.include_usernames:
             # Sort by username iff including the usernames in the output.
             # This makes it easier to find students.
-            nbs = OrderedDict(sorted(nbs, key=lambda t: t[0].lower()))
+            nbs = OrderedDict(sorted(nbs.items(), key=lambda t: t[0].lower()))
 
-        filtered_cells = []
         for prompt in self.question_prompts:
-            suppress_non_answer = False
-            answer_strings = set()  # answers to this question, as strings; used to avoid duplicates
             for gh_username, notebook_content in nbs.items():
                 if notebook_content is None:
                     continue
+                suppress_non_answer = bool(prompt.answers)
                 response_cells = \
                     prompt.get_closest_match(notebook_content['cells'],
                                              NotebookExtractor.MATCH_THRESH,
@@ -116,17 +114,26 @@ class NotebookExtractor(object):
                 elif not response_cells[-1]['source']:
                     print "Blank", prompt.question_heading, "for", gh_username
                 else:
+                    prompt.answers[gh_username] = response_cells
+
+        remove_duplicate_answers = not self.include_usernames
+        if remove_duplicate_answers:
+            for prompt in self.question_prompts:
+                answer_strings = set()  # answers to this question, as strings; used to avoid duplicates
+                for gh_username, response_cells in prompt.answers.items():
                     answer_string = "\n".join("".join(cell['source']) for cell in response_cells).strip()
-                    if self.include_usernames:
-                        title = "#### " + gh_username
-                        filtered_cells.append({'cell_type': 'markdown', 'source': [title], 'metadata': {}})
-                    elif not answer_string:
-                        continue
-                    elif not prompt.is_poll and answer_string in answer_strings:
-                        continue
-                    answer_strings.add(answer_string)
-                    filtered_cells.extend(response_cells)
-                    suppress_non_answer = True
+                    if answer_string in answer_strings:
+                        del prompt.answers[gh_username]
+                    else:
+                        answer_strings.add(answer_string)
+
+        filtered_cells = []
+        for prompt in self.question_prompts:
+            for gh_username, response_cells in prompt.answers.items():
+                if self.include_usernames:
+                    title = "#### " + gh_username
+                    filtered_cells.append({'cell_type': 'markdown', 'source': [title], 'metadata': {}})
+                filtered_cells.extend(response_cells)
 
         leading, nb_name_full = os.path.split(self.notebook_URLs[0])
         nb_name_stem, extension = os.path.splitext(nb_name_full)
@@ -167,6 +174,7 @@ class QuestionPrompt(object):
         self.start_md = start_md
         self.stop_md = stop_md
         self.is_poll = is_poll
+        self.answers = OrderedDict()
 
     def get_closest_match(self,
                           cells,
