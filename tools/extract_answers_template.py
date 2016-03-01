@@ -7,30 +7,34 @@
 
 import argparse
 import json
+import os
 import re
+import sys
+import urllib
+from collections import OrderedDict
+from copy import deepcopy
 from multiprocessing import Pool
 from numpy import argmin
 import Levenshtein
-from copy import deepcopy
 import pandas as pd
-import urllib
-import os
 
 
 def read_json_from_url(url):
-    """Given an URL, return its contents as JSON.
-    Prints exceptions, and returns None.
+    """Given an URL, return its contents as JSON; or None if no JSON exists at that URL.
+
+    Prints exceptions except 404.
 
     This is a global function so that it can be used as an argument to `p.map`"""
 
     fid = urllib.urlopen(url)
     try:
-        return json.load(fid)
+        if 200 <= fid.getcode() <= 299:
+            return json.load(fid)
     except Exception as ex:
-        print "error loading {}: {}".format(url, ex)
-        return None
+        print >> sys.stderr, "error loading {}: {}".format(url, ex)
     finally:
         fid.close()
+    return None
 
 
 class NotebookExtractor(object):
@@ -72,23 +76,35 @@ class NotebookExtractor(object):
                     prev_prompt = None
         return prompts
 
+    def fetch_notebooks(self):
+        """Returns a dictionary {github_username -> url, json?}.
+
+        Unavailable notebooks have a value of None."""
+
+        def repo_url_to_github_username(url):
+            return url.split('/')[3]  # TODO pass the username in instead of recovering it
+
+        p = Pool(20)  # HTTP fetch parallelism. This number is empirically good.
+        print "Retrieving %d notebooks" % len(self.notebook_URLs)
+        return dict(zip(map(repo_url_to_github_username, self.notebook_URLs),
+                        p.map(read_json_from_url, self.notebook_URLs)))
+
     def extract(self):
         """ Filter the notebook at the notebook_URL so that it only contains
             the questions and answers to the reading.
         """
-        p = Pool(20)  # HTTP fetch parallelism. This nuber is empirically good.
-        print "Retrieving", len(self.notebook_URLs), "notebooks"
-        nbs = zip(self.notebook_URLs, p.map(read_json_from_url, self.notebook_URLs))
-        # `nbs` is a list of pairs of (url, json)
+
+        nbs = self.fetch_notebooks()
         if self.include_usernames:
             # Sort by username iff including the usernames in the output.
             # This makes it easier to find students.
-            nbs = sorted(nbs, key=lambda t: t[0].lower())
+            nbs = OrderedDict(sorted(nbs, key=lambda t: t[0].lower()))
+
         filtered_cells = []
         for prompt in self.question_prompts:
             suppress_non_answer = False
             answer_strings = set()  # answers to this question, as strings; used to avoid duplicates
-            for url, notebook_content in nbs:
+            for gh_username, notebook_content in nbs.items():
                 if notebook_content is None:
                     continue
                 response_cells = \
@@ -96,13 +112,12 @@ class NotebookExtractor(object):
                                              NotebookExtractor.MATCH_THRESH,
                                              suppress_non_answer)
                 if not response_cells:
-                    print "Missed", prompt.question_heading, "for", url
+                    print "Missed", prompt.question_heading, "for", gh_username
                 elif not response_cells[-1]['source']:
-                    print "Blank", prompt.question_heading, "for", url
+                    print "Blank", prompt.question_heading, "for", gh_username
                 else:
                     answer_string = "\n".join("".join(cell['source']) for cell in response_cells).strip()
                     if self.include_usernames:
-                        gh_username = url.split('/')[3]  # TODO pass the student name here
                         title = "#### " + gh_username
                         filtered_cells.append({'cell_type': 'markdown', 'source': [title], 'metadata': {}})
                     elif not answer_string:
@@ -137,6 +152,7 @@ class NotebookExtractor(object):
 
 
 class QuestionPrompt(object):
+
     def __init__(self, question_heading, start_md, stop_md, is_poll=False):
         """ Initialize a question prompt with the specified
             starting markdown (the question), and stopping
@@ -181,52 +197,61 @@ class QuestionPrompt(object):
             end_offset = argmin(distances)
         if len(self.question_heading) != 0 and not suppress_non_answer_cells:
             return_value.append(NotebookExtractor.markdown_heading_cell(
-                    self.question_heading, '##'))
+                self.question_heading, '##'))
         if not suppress_non_answer_cells:
             return_value.append(cells[best_match])
-        return_value.extend(cells[best_match+1:best_match+end_offset])
+        return_value.extend(cells[best_match + 1:best_match + end_offset])
         return return_value
 
 
 def validate_github_username(gh_name):
-    """Return gh_name if that user has a `repo_name` repository, else None"""
+    """Return `gh_name` if that Github user has a `repo_name` repository; else None."""
     fid = urllib.urlopen("http://github.com/" + gh_name)
-    fid.readlines()  # for effect
     fid.close()
-    return gh_name if fid.getcode() == 200 else None
+    return gh_name if 200 <= fid.getcode() <= 299 else None
 
 
-def get_user_repo_urls(gh_usernames_path, repo_name="ReadingJournal"):
-    """`gh_usernames_path` is a path to a CSV file with a "gh_username" column"""
-    survey_data = pd.read_csv(gh_usernames_path)
-    github_usernames = survey_data["gh_username"]
+def validate_github_usernames(gh_usernames, repo_name):
+    """Returns a set of valid github usernames.
+
+    A name is valid iff a GitHub user with that name exists, and owns a repository named `repo_name`.
+
+    `gh_usernames_path` is a path to a CSV file with a `gh_username` column.
+
+    Prints invalid names as errors."""
     p = Pool(20)
-    valid_usernames = filter(None, p.map(validate_github_username, github_usernames))
-    invalid_usernames = set(github_usernames) - set(valid_usernames)
+    valid_usernames = filter(None, p.map(validate_github_username, gh_usernames))
+    invalid_usernames = set(gh_usernames) - set(valid_usernames)
     if invalid_usernames:
-        print "Invalid github username(s):", invalid_usernames
-    return ["https://raw.githubusercontent.com/{username}/{repo_name}"
-            .format(username=u, repo_name=repo_name)
-            for u in valid_usernames]
+        print >> sys.stderr, "Invalid github username(s):", ', '.join(invalid_usernames)
+    return valid_usernames
 
 
-def get_user_notebook_urls(user_repo_urls, template_nb_path):
+def get_github_user_raw_repo_url(gh_username, repo_name):
+    return "https://raw.githubusercontent.com/{username}/{repo_name}".format(username=gh_username, repo_name=repo_name)
+
+
+def get_github_user_notebook_url(gh_username, template_nb_path, repo_name):
     m = re.match(r'.*day(\d+)_', template_nb_path)
     assert m, "template file must include day\d+_"
     notebook_number = m.group(1)
     notebook_filename = "day{}_reading_journal.ipynb".format(notebook_number)
-    return ["{repo_url}/{branch}/{path}".format(repo_url=url, branch="master", path=notebook_filename)
-            for url in user_repo_urls]
+    repo_url = get_github_user_raw_repo_url(gh_username, repo_name)
+    return "{repo_url}/{branch}/{path}".format(repo_url=repo_url, branch="master", path=notebook_filename)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Summarize a set of Jupyter notebooks.')
+    parser.add_argument('--repo', type=str, default='ReadingJournal', help='Github repository name')
     parser.add_argument('--include-usernames', action='store_true', help='include user names in the summary notebook')
     parser.add_argument('gh_users', type=str, metavar='GH_USERNAME_CSV_FILE')
     parser.add_argument('template_notebook', type=str, metavar='JUPYTER_NOTEBOOK_FILE')
     args = parser.parse_args()
 
-    user_repo_urls = get_user_repo_urls(args.gh_users)
+    repo_name = args.repo
+    github_username_csv = pd.read_csv(args.gh_users)
+    github_usernames = validate_github_usernames(github_username_csv["gh_username"], repo_name)
+
     template_nb_path = args.template_notebook
-    notebook_urls = get_user_notebook_urls(user_repo_urls, args.template_notebook)
-    nbe = NotebookExtractor(notebook_urls, args.template_notebook, include_usernames=args.include_usernames)
+    notebook_urls = [get_github_user_notebook_url(u, template_nb_path, repo_name) for u in github_usernames]
+    nbe = NotebookExtractor(notebook_urls, template_nb_path, include_usernames=args.include_usernames)
     nbe.extract()
