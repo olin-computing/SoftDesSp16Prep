@@ -18,6 +18,8 @@ from numpy import argmin
 import Levenshtein
 import pandas as pd
 
+PROJECT_DIR = os.path.relpath(os.path.join(os.path.dirname(__file__), '..'))
+
 
 def read_json_from_url(url):
     """Given an URL, return its contents as JSON; or None if no JSON exists at that URL.
@@ -68,6 +70,7 @@ class NotebookExtractor(object):
                 if prev_prompt is not None:
                     prompts[-1].stop_md = u''.join(cell['source'])
                 prompts.append(QuestionPrompt(question_heading=u"",
+                                              index=len(prompts),
                                               start_md=u''.join(cell['source']),
                                               stop_md=u'next_cell',
                                               is_poll=metadata.get('is_poll', False)
@@ -111,7 +114,7 @@ class NotebookExtractor(object):
             # This makes it easier to find students.
             nbs = OrderedDict(sorted(nbs.items(), key=lambda t: t[0].lower()))
 
-        for prompt in self.question_prompts:
+        for i, prompt in enumerate(self.question_prompts):
             for gh_username, notebook_content in nbs.items():
                 if notebook_content is None:
                     continue
@@ -121,9 +124,9 @@ class NotebookExtractor(object):
                                              NotebookExtractor.MATCH_THRESH,
                                              suppress_non_answer)
                 if not response_cells:
-                    print "Missed", prompt.question_heading, "for", gh_username
+                    print "Missed {prompt_name}: {username}".format(prompt_name=prompt.name, username=gh_username)
                 elif not response_cells[-1]['source']:
-                    print "Blank", prompt.question_heading, "for", gh_username
+                    print "Blank {prompt_name}: {username}".format(prompt_name=prompt.name, username=gh_username)
                 else:
                     prompt.answers[gh_username] = response_cells
 
@@ -147,16 +150,14 @@ class NotebookExtractor(object):
                 prompt.answers = OrderedDict(sorted(prompt.answers.items(), key=lambda t: cell_slines_length(t[1])))
 
     def write_notebook(self):
-        output_dir = os.path.join(os.path.dirname(__file__), "../processed_notebooks")
         suffix = "_responses_with_names" if self.include_usernames else "_responses"
-        output_file = os.path.join(output_dir, self.nb_name_stem + suffix + ".ipynb")
+        output_file = os.path.join(PROJECT_DIR, "processed_notebooks", self.nb_name_stem + suffix + ".ipynb")
 
         filtered_cells = []
         for prompt in self.question_prompts:
             for gh_username, response_cells in prompt.answers.items():
                 if self.include_usernames:
-                    title = "#### " + gh_username
-                    filtered_cells.append({'cell_type': 'markdown', 'source': [title], 'metadata': {}})
+                    filtered_cells.append(NotebookExtractor.markdown_heading_cell(gh_username, 4))
                 filtered_cells.extend(response_cells)
         answer_book = deepcopy(self.template)
         answer_book['cells'] = filtered_cells
@@ -166,14 +167,15 @@ class NotebookExtractor(object):
             json.dump(answer_book, fid)
 
     def write_answer_counts(self):
+        output_file = os.path.join(PROJECT_DIR, 'processed_notebooks', '%s-answer-counts.csv' % self.nb_name_stem)
+
         dataset = [[u in prompt.answers for u in self.usernames] for prompt in self.question_prompts]
         df = pd.DataFrame(data=dataset, columns=self.usernames)
-        df.index = range(1, 1 + len(dataset))
+        df.index = [prompt.name for prompt in self.question_prompts]
         df.sort_index(axis=1, inplace=True)
         df['Total'] = df.sum(axis=1)
         df = pd.concat([df, pd.DataFrame(df.sum(axis=0).astype(int), columns=['Total']).T])
 
-        output_file = os.path.join('processed_notebooks', '%s-answer-counts.csv' % self.nb_name_stem)
         print "Writing", output_file
         df.to_csv(output_file)
 
@@ -185,12 +187,11 @@ class NotebookExtractor(object):
         """
         return {u'cell_type': u'markdown',
                 u'metadata': {},
-                u'source': unicode(heading_level + " " + text)}
+                u'source': unicode('#' * heading_level + " " + text)}
 
 
 class QuestionPrompt(object):
-
-    def __init__(self, question_heading, start_md, stop_md, is_poll=False):
+    def __init__(self, question_heading, start_md, stop_md, index=None, is_poll=False):
         """ Initialize a question prompt with the specified
             starting markdown (the question), and stopping
             markdown (the markdown from the next content
@@ -204,7 +205,21 @@ class QuestionPrompt(object):
         self.start_md = start_md
         self.stop_md = stop_md
         self.is_poll = is_poll
+        self.index = index
         self.answers = OrderedDict()
+
+    @property
+    def name(self):
+        m = re.match(r'^#+\s*(.+)\n', self.start_md)
+        if self.question_heading:
+            return self.question_heading
+        format_str = {
+            (False, False): '',
+            (False, True): '{title}',
+            (True, False): '{number}',
+            (True, True): '{number}. {title}'
+        }[isinstance(self.index, int), bool(m)]
+        return format_str.format(number=self.index and self.index + 1, title=m and m.group(1))
 
     def get_closest_match(self,
                           cells,
@@ -234,8 +249,7 @@ class QuestionPrompt(object):
                 return return_value
             end_offset = argmin(distances)
         if len(self.question_heading) != 0 and not suppress_non_answer_cells:
-            return_value.append(NotebookExtractor.markdown_heading_cell(
-                self.question_heading, '##'))
+            return_value.append(NotebookExtractor.markdown_heading_cell(self.question_heading, 2))
         if not suppress_non_answer_cells:
             return_value.append(cells[best_match])
         return_value.extend(cells[best_match + 1:best_match + end_offset])
