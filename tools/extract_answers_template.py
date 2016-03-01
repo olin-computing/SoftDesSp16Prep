@@ -125,12 +125,13 @@ class NotebookExtractor(object):
                                              suppress_non_answer)
                 if not response_cells:
                     print "Missed {prompt_name}: {username}".format(prompt_name=prompt.name, username=gh_username)
-                elif not response_cells[-1]['source']:
+                elif not response_cells[-1]['source'] or not any(c['source'] for c in response_cells):
                     print "Blank {prompt_name}: {username}".format(prompt_name=prompt.name, username=gh_username)
                 else:
                     prompt.answers[gh_username] = response_cells
 
         remove_duplicate_answers = not self.include_usernames
+        remove_duplicate_answers = False  # interferes with writing the answer counts
         if remove_duplicate_answers:
             for prompt in self.question_prompts:
                 answer_strings = set()  # answers to this question, as strings; used to avoid duplicates
