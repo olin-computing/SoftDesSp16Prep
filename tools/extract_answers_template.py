@@ -180,6 +180,8 @@ class NotebookExtractor(object):
         df = pd.concat([df, pd.DataFrame(df.sum(axis=0).astype(int), columns=['Total']).T])
 
         print "Writing", output_file
+        print 'Answer counts:'
+        print df['Total']
         df.to_csv(output_file)
 
     @staticmethod
@@ -237,7 +239,7 @@ class QuestionPrompt(object):
             (True, False): '{number}',
             (True, True): '{number}. {title}'
         }[isinstance(self.index, int), bool(m)]
-        return format_str.format(number=self.index and self.index + 1, title=m and m.group(1))
+        return format_str.format(number=(self.index or -1) + 1, title=m and m.group(1))
 
     def get_closest_match(self,
                           cells,
