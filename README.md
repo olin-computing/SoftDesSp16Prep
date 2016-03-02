@@ -27,8 +27,9 @@ This command assumes there only pull request per repository.
 
 These Jupyter cell metadata fields are meaningful:
 
-* `is_question`
-* `is_poll`
+* `is_question`: anchor for finding answers in student notebooks
+* `is_optional`: don't list students who didn't answer this
+* `is_poll`: don't eliminate duplicates answers, or list students who didn't answer
 * `allow_multi_cell`
 
 ## Install

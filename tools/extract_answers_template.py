@@ -73,6 +73,7 @@ class NotebookExtractor(object):
                                               index=len(prompts),
                                               start_md=u''.join(cell['source']),
                                               stop_md=u'next_cell',
+                                              is_optional=metadata.get('is_optional', None),
                                               is_poll=metadata.get('is_poll', False)
                                               ))
                 if metadata.get('allow_multi_cell', False):
@@ -114,7 +115,9 @@ class NotebookExtractor(object):
             # This makes it easier to find students.
             nbs = OrderedDict(sorted(nbs.items(), key=lambda t: t[0].lower()))
 
-        for i, prompt in enumerate(self.question_prompts):
+        for prompt in self.question_prompts:
+            answer_status = {}
+            prompt.answer_status = answer_status
             for gh_username, notebook_content in nbs.items():
                 if notebook_content is None:
                     continue
@@ -124,11 +127,20 @@ class NotebookExtractor(object):
                                              NotebookExtractor.MATCH_THRESH,
                                              suppress_non_answer)
                 if not response_cells:
-                    print "Missed {prompt_name}: {username}".format(prompt_name=prompt.name, username=gh_username)
+                    prompt.answer_status[gh_username] = 'missed'
                 elif not response_cells[-1]['source'] or not any(c['source'] for c in response_cells):
-                    print "Blank {prompt_name}: {username}".format(prompt_name=prompt.name, username=gh_username)
+                    prompt.answer_status[gh_username] = 'blank'
                 else:
+                    prompt.answer_status[gh_username] = 'answered'
                     prompt.answers[gh_username] = response_cells
+
+        for prompt in self.question_prompts:
+            for username, status in sorted(prompt.answer_status.items()):
+                if not prompt.is_poll and not prompt.is_optional and status != 'answered':
+                        print "{status} {prompt_name}: {username}".format(
+                            status=status.capitalize(),
+                            prompt_name=prompt.name,
+                            username=gh_username)
 
         sort_responses = not self.include_usernames
         sort_responses = False  # FIXME doesn't work because questions are collected into first response
@@ -182,7 +194,7 @@ class NotebookExtractor(object):
 
 
 class QuestionPrompt(object):
-    def __init__(self, question_heading, start_md, stop_md, index=None, is_poll=False):
+    def __init__(self, question_heading, start_md, stop_md, index=None, is_poll=False, is_optional=None):
         """ Initialize a question prompt with the specified
             starting markdown (the question), and stopping
             markdown (the markdown from the next content
@@ -192,9 +204,12 @@ class QuestionPrompt(object):
             the extracted responses is contined in question_heading.
             To omit the question heading, specify the empty string.
         """
+        if is_optional is None and start_md:
+            is_optional = bool(re.match(r'optional', start_md.split('\n')[0], re.I))
         self.question_heading = question_heading
         self.start_md = start_md
         self.stop_md = stop_md
+        self.is_optional = is_optional
         self.is_poll = is_poll
         self.index = index
         self.answers = OrderedDict()
