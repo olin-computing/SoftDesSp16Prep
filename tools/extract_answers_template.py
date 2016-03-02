@@ -130,33 +130,23 @@ class NotebookExtractor(object):
                 else:
                     prompt.answers[gh_username] = response_cells
 
-        remove_duplicate_answers = not self.include_usernames
-        remove_duplicate_answers = False  # interferes with writing the answer counts
-        if remove_duplicate_answers:
-            for prompt in self.question_prompts:
-                answer_strings = set()  # answers to this question, as strings; used to avoid duplicates
-                for gh_username, response_cells in prompt.answers.items():
-                    answer_string = "\n".join("".join(cell['source']) for cell in response_cells).strip()
-                    if answer_string in answer_strings:
-                        del prompt.answers[gh_username]
-                    else:
-                        answer_strings.add(answer_string)
-
         sort_responses = not self.include_usernames
         sort_responses = False  # FIXME doesn't work because questions are collected into first response
         if sort_responses:
             def cell_slines_length(response_cells):
-                return len("\n".join("".join(cell['source']) for cell in response_cells).strip())
+                return len('\n'.join(u''.join(cell['source']) for cell in response_cells).strip())
             for prompt in self.question_prompts:
                 prompt.answers = OrderedDict(sorted(prompt.answers.items(), key=lambda t: cell_slines_length(t[1])))
 
     def write_notebook(self):
         suffix = "_responses_with_names" if self.include_usernames else "_responses"
         output_file = os.path.join(PROJECT_DIR, "processed_notebooks", self.nb_name_stem + suffix + ".ipynb")
+        remove_duplicate_answers = not self.include_usernames
 
         filtered_cells = []
         for prompt in self.question_prompts:
-            for gh_username, response_cells in prompt.answers.items():
+            answers = prompt.answers_without_duplicates if remove_duplicate_answers else prompt.answers
+            for gh_username, response_cells in answers.items():
                 if self.include_usernames:
                     filtered_cells.append(NotebookExtractor.markdown_heading_cell(gh_username, 4))
                 filtered_cells.extend(response_cells)
@@ -210,6 +200,18 @@ class QuestionPrompt(object):
         self.answers = OrderedDict()
 
     @property
+    def answers_without_duplicates(self):
+        answers = dict(self.answers)
+        answer_strings = set()  # answers to this question, as strings; used to avoid duplicates
+        for username, response_cells in self.answers.items():
+            answer_string = '\n'.join(u''.join(cell['source']) for cell in response_cells).strip()
+            if answer_string in answer_strings:
+                del answers[username]
+            else:
+                answer_strings.add(answer_string)
+        return answers
+
+    @property
     def name(self):
         m = re.match(r'^#+\s*(.+)\n', self.start_md)
         if self.question_heading:
@@ -231,8 +233,7 @@ class QuestionPrompt(object):
             the matching_threshold, the empty list will be
             returned. """
         return_value = []
-        distances = [Levenshtein.distance(self.start_md,
-                                          u''.join(cell['source']))
+        distances = [Levenshtein.distance(self.start_md, u''.join(cell['source']))
                      for cell in cells]
         if min(distances) > matching_threshold:
             return return_value
@@ -243,8 +244,7 @@ class QuestionPrompt(object):
         elif len(self.stop_md) == 0:
             end_offset = len(cells) - best_match
         else:
-            distances = [Levenshtein.distance(self.stop_md,
-                                              u''.join(cell['source']))
+            distances = [Levenshtein.distance(self.stop_md, u''.join(cell['source']))
                          for cell in cells[best_match:]]
             if min(distances) > matching_threshold:
                 return return_value
