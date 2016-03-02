@@ -176,7 +176,7 @@ class NotebookExtractor(object):
 
         print "Writing", output_file
         with open(output_file, 'wt') as fid:
-            json.dump(answer_book, fid)
+            json.dump(answer_book, fid, indent=2, sort_keys=True)
 
     def write_answer_counts(self):
         output_file = os.path.join(DATAFILE_DIR, '%s_response_counts_with_names.csv' % self.nb_name_stem)
@@ -201,6 +201,8 @@ class NotebookExtractor(object):
             print "Writing poll results for %s to %s" % (prompt.name, output_file)
 
             def user_response_text(username):
+                if username in prompt.answers:
+                    print prompt.answers.get(username, [])
                 return NotebookUtils.cell_list_text(prompt.answers.get(username, []))
 
             dataset = [(self.gh_username_to_fullname(username), user_response_text(username))
