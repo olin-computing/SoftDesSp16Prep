@@ -23,6 +23,14 @@ of each pull request.
 
 This command assumes there only pull request per repository.
 
+## Notebook Metadata
+
+These Jupyter cell metadata fields are meaningful:
+
+* `is_question`
+* `is_poll`
+* `allow_multi_cell`
+
 ## Install
 
     pip install -r requirements.txt
