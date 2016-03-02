@@ -19,6 +19,7 @@ import Levenshtein
 import pandas as pd
 
 PROJECT_DIR = os.path.relpath(os.path.join(os.path.dirname(__file__), '..'))
+DATAFILE_DIR = os.path.join(PROJECT_DIR, 'data')
 
 
 def read_json_from_url(url):
@@ -69,12 +70,13 @@ class NotebookExtractor(object):
             if metadata.get('is_question', False):
                 if prev_prompt is not None:
                     prompts[-1].stop_md = u''.join(cell['source'])
+                is_poll = metadata.get('is_poll', 'Reading Journal feedback' in cell['source'][0].split('\n')[0])
                 prompts.append(QuestionPrompt(question_heading=u"",
                                               index=len(prompts),
                                               start_md=u''.join(cell['source']),
                                               stop_md=u'next_cell',
                                               is_optional=metadata.get('is_optional', None),
-                                              is_poll=metadata.get('is_poll', False)
+                                              is_poll=is_poll
                                               ))
                 if metadata.get('allow_multi_cell', False):
                     prev_prompt = prompts[-1]
@@ -127,25 +129,12 @@ class NotebookExtractor(object):
                                              suppress_non_answer)
                 if not response_cells:
                     status = 'missed'
-                elif not response_cells[-1]['source'] or not any(c['source'] for c in response_cells):
+                elif not response_cells[-1]['source'] or not NotebookUtils.cell_list_text(response_cells):
                     status = 'blank'
                 else:
                     status = 'answered'
                     prompt.answers[gh_username] = response_cells
                 prompt.answer_status[gh_username] = status
-
-        # Report missing answers
-        for prompt in self.question_prompts:
-            if prompt.is_poll or prompt.is_optional:
-                continue
-            unanswered = sorted((username, status)
-                                for username, status in prompt.answer_status.items()
-                                if status != 'answered')
-            for username, status in unanswered:
-                print "{status} {prompt_name}: {username}".format(
-                    status=status.capitalize(),
-                    prompt_name=prompt.name,
-                    username=self.gh_username_to_fullname(username))
 
         sort_responses = not self.include_usernames
         sort_responses = False  # FIXME doesn't work because questions are collected into first response
@@ -154,6 +143,20 @@ class NotebookExtractor(object):
                 return len('\n'.join(u''.join(cell['source']) for cell in response_cells).strip())
             for prompt in self.question_prompts:
                 prompt.answers = OrderedDict(sorted(prompt.answers.items(), key=lambda t: cell_slines_length(t[1])))
+
+    def report_missing_answers(self):
+        # Report missing answers
+        mandatory_questions = [prompt for prompt in self.question_prompts
+                               if not prompt.is_poll and not prompt.is_optional]
+        for prompt in mandatory_questions:
+            unanswered = sorted((username, status)
+                                for username, status in prompt.answer_status.items()
+                                if status != 'answered')
+            for username, status in unanswered:
+                print "{status} {prompt_name}: {username}".format(
+                    status=status.capitalize(),
+                    prompt_name=prompt.name,
+                    username=self.gh_username_to_fullname(username))
 
     def write_notebook(self):
         suffix = "_responses_with_names" if self.include_usernames else "_responses"
@@ -166,7 +169,7 @@ class NotebookExtractor(object):
             for gh_username, response_cells in answers.items():
                 if self.include_usernames:
                     filtered_cells.append(
-                        NotebookExtractor.markdown_heading_cell(self.gh_username_to_fullname(gh_username), 4))
+                        NotebookUtils.markdown_heading_cell(self.gh_username_to_fullname(gh_username), 4))
                 filtered_cells.extend(response_cells)
         answer_book = deepcopy(self.template)
         answer_book['cells'] = filtered_cells
@@ -176,7 +179,7 @@ class NotebookExtractor(object):
             json.dump(answer_book, fid)
 
     def write_answer_counts(self):
-        output_file = os.path.join(PROJECT_DIR, 'processed_notebooks', '%s-answer-counts.csv' % self.nb_name_stem)
+        output_file = os.path.join(DATAFILE_DIR, '%s_response_counts_with_names.csv' % self.nb_name_stem)
 
         dataset = [[u in prompt.answers for u in self.usernames] for prompt in self.question_prompts]
         df = pd.DataFrame(data=dataset, columns=map(self.gh_username_to_fullname, self.usernames))
@@ -190,15 +193,23 @@ class NotebookExtractor(object):
         print df['Total']
         df.to_csv(output_file)
 
-    @staticmethod
-    def markdown_heading_cell(text, heading_level):
-        """ A convenience function to return a markdown cell
-            with the specified text at the specified heading_level.
-            e.g. mark_down_heading_cell('Notebook Title','#')
-        """
-        return {u'cell_type': u'markdown',
-                u'metadata': {},
-                u'source': unicode('#' * heading_level + " " + text)}
+    def write_poll_results(self):
+        poll_questions = [prompt for prompt in self.question_prompts if prompt.is_poll]
+        for prompt in poll_questions:
+            output_file = os.path.join(DATAFILE_DIR,
+                                       '%s_q%d_responses_with_names.csv' % (self.nb_name_stem, prompt.index + 1))
+            print "Writing poll results for %s to %s" % (prompt.name, output_file)
+
+            def user_response_text(username):
+                return NotebookUtils.cell_list_text(prompt.answers.get(username, []))
+
+            dataset = [(self.gh_username_to_fullname(username), user_response_text(username))
+                       for username in self.usernames
+                       if user_response_text(username)]
+            df = pd.DataFrame(data=[response for _, response in dataset], columns=['Response'])
+            df.index = [username for username, _ in dataset]
+            df.index.name = 'Student'
+            df.to_csv(output_file)
 
 
 class QuestionPrompt(object):
@@ -273,11 +284,27 @@ class QuestionPrompt(object):
                 return return_value
             end_offset = argmin(distances)
         if len(self.question_heading) != 0 and not suppress_non_answer_cells:
-            return_value.append(NotebookExtractor.markdown_heading_cell(self.question_heading, 2))
+            return_value.append(NotebookUtils.markdown_heading_cell(self.question_heading, 2))
         if not suppress_non_answer_cells:
             return_value.append(cells[best_match])
         return_value.extend(cells[best_match + 1:best_match + end_offset])
         return return_value
+
+
+class NotebookUtils:
+    @staticmethod
+    def markdown_heading_cell(text, heading_level):
+        """ A convenience function to return a markdown cell
+            with the specified text at the specified heading_level.
+            e.g. mark_down_heading_cell('Notebook Title','#')
+        """
+        return {u'cell_type': u'markdown',
+                u'metadata': {},
+                u'source': unicode('#' * heading_level + " " + text)}
+
+    @staticmethod
+    def cell_list_text(cells):
+        return u''.join(s for cell in cells for s in cell['source']).strip()
 
 
 def validate_github_username(gh_name):
@@ -337,5 +364,7 @@ if __name__ == '__main__':
                                  for u in users_df['gh_username']]
     nbe = NotebookExtractor(users_df, template_nb_path, include_usernames=args.include_usernames)
     nbe.extract()
+    nbe.report_missing_answers()
     nbe.write_notebook()
+    nbe.write_poll_results()
     nbe.write_answer_counts()
