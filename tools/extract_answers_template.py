@@ -19,7 +19,7 @@ import Levenshtein
 import pandas as pd
 
 PROJECT_DIR = os.path.relpath(os.path.join(os.path.dirname(__file__), '..'))
-DATAFILE_DIR = os.path.join(PROJECT_DIR, 'data')
+DATAFILE_DIR = os.path.join(PROJECT_DIR, 'summaries')
 
 
 def read_json_from_url(url):
