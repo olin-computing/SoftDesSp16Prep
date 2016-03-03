@@ -201,16 +201,17 @@ class NotebookExtractor(object):
             print "Writing poll results for %s to %s" % (prompt.name, output_file)
 
             def user_response_text(username):
-                if username in prompt.answers:
-                    print prompt.answers.get(username, [])
-                return NotebookUtils.cell_list_text(prompt.answers.get(username, []))
+                cells = [cell for cell in prompt.answers.get(username, [])
+                         if not cell['metadata'].get('is_question', False)]
+                return NotebookUtils.cell_list_text(cells)
 
-            dataset = [(self.gh_username_to_fullname(username), user_response_text(username))
-                       for username in self.usernames
-                       if user_response_text(username)]
-            df = pd.DataFrame(data=[response for _, response in dataset], columns=['Response'])
-            df.index = [username for username, _ in dataset]
+            df = pd.DataFrame(
+                index=self.usernames,
+                data=[user_response_text(username) for username in self.usernames],
+                columns=['Response'])
             df.index.name = 'Student'
+            df = df[df['Response'] != '']
+
             df.to_csv(output_file)
 
 
