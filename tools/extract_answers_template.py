@@ -19,7 +19,7 @@ import Levenshtein
 import pandas as pd
 
 PROJECT_DIR = os.path.relpath(os.path.join(os.path.dirname(__file__), '..'))
-DATAFILE_DIR = os.path.join(PROJECT_DIR, 'summaries')
+SUMMARY_DIR = os.path.join(PROJECT_DIR, 'summaries')
 
 
 def read_json_from_url(url):
@@ -180,7 +180,7 @@ class NotebookExtractor(object):
             json.dump(answer_book, fid, indent=2, sort_keys=True)
 
     def write_answer_counts(self):
-        output_file = os.path.join(DATAFILE_DIR, '%s_response_counts_with_names.csv' % self.nb_name_stem)
+        output_file = os.path.join(SUMMARY_DIR, '%s_response_counts_with_names.csv' % self.nb_name_stem)
 
         df = pd.DataFrame(
             data=[[u in prompt.answers for u in self.usernames] for prompt in self.question_prompts],
@@ -199,7 +199,7 @@ class NotebookExtractor(object):
     def write_poll_results(self):
         poll_questions = [prompt for prompt in self.question_prompts if prompt.is_poll]
         for prompt in poll_questions:
-            output_file = os.path.join(DATAFILE_DIR,
+            output_file = os.path.join(SUMMARY_DIR,
                                        '%s_q%d_responses_with_names.csv' % (self.nb_name_stem, prompt.index + 1))
             print "Writing %s: poll results for %s" % (output_file, prompt.name)
 
@@ -209,7 +209,7 @@ class NotebookExtractor(object):
                 return NotebookUtils.cell_list_text(cells)
 
             df = pd.DataFrame(
-                index=self.usernames,
+                index=[self.gh_username_to_fullname(name) for name in self.usernames],
                 data=[user_response_text(username) for username in self.usernames],
                 columns=['Response'])
             df.index.name = 'Student'
