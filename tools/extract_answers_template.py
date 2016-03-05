@@ -53,8 +53,8 @@ class NotebookExtractor(object):
         self.users_df = users_df
         self.question_prompts = self.build_question_prompts(notebook_template_file)
         self.include_usernames = include_usernames
-        nb_name_full = os.path.split(notebook_template_file)[1]
-        self.nb_name_stem = os.path.splitext(nb_name_full)[0]
+        nb_basename = os.path.basename(notebook_template_file)
+        self.nb_name_stem = os.path.splitext(nb_basename)[0]
 
     def build_question_prompts(self, notebook_template_file):
         """Returns a list of `QuestionPrompt`. Each cell with metadata `is_question` truthy
@@ -90,10 +90,10 @@ class NotebookExtractor(object):
     def fetch_notebooks(self):
         """Returns a dictionary {github_username -> url, json?}.
 
-        Unavailable notebooks have a value of None."""
+        Unavailable notebooks have a value of `None`."""
 
         p = Pool(20)  # HTTP fetch parallelism. This number is empirically good.
-        print "Retrieving %d notebooks" % self.users_df['notebook_urls'].count()
+        print "Fetching %d notebooks..." % self.users_df['notebook_urls'].count()
         return dict(zip(self.users_df['gh_username'],
                         p.map(read_json_from_url, self.users_df['notebook_urls'])))
 
@@ -106,11 +106,12 @@ class NotebookExtractor(object):
         """
 
         nbs = self.fetch_notebooks()
-        self.usernames = sorted(self.users_df['gh_username'], key=self.gh_username_to_fullname)
+        self.usernames = sorted([name for name, nb in nbs.items() if nb], key=self.gh_username_to_fullname)
 
         users_missing_notebooks = [u for u, notebook_content in nbs.items() if not notebook_content]
         if users_missing_notebooks:
-            print "Users missing notebooks:", ', '.join(map(self.gh_username_to_fullname, users_missing_notebooks))
+            fullnames = map(self.gh_username_to_fullname, users_missing_notebooks)
+            print "Users missing notebooks:", ', '.join(sorted(fullnames))
 
         if self.include_usernames:
             # Sort by username iff including the usernames in the output.
@@ -181,11 +182,13 @@ class NotebookExtractor(object):
     def write_answer_counts(self):
         output_file = os.path.join(DATAFILE_DIR, '%s_response_counts_with_names.csv' % self.nb_name_stem)
 
-        dataset = [[u in prompt.answers for u in self.usernames] for prompt in self.question_prompts]
-        df = pd.DataFrame(data=dataset, columns=map(self.gh_username_to_fullname, self.usernames))
+        df = pd.DataFrame(
+            data=[[u in prompt.answers for u in self.usernames] for prompt in self.question_prompts],
+            columns=[self.gh_username_to_fullname(name) for name in self.usernames],
+        )
         df.index = [prompt.name for prompt in self.question_prompts]
         df.sort_index(axis=1, inplace=True)
-        df['Total'] = df.sum(axis=1)
+        df.insert(0, 'Total', df.sum(axis=1))
         df = pd.concat([df, pd.DataFrame(df.sum(axis=0).astype(int), columns=['Total']).T])
 
         print "Writing", output_file
@@ -198,7 +201,7 @@ class NotebookExtractor(object):
         for prompt in poll_questions:
             output_file = os.path.join(DATAFILE_DIR,
                                        '%s_q%d_responses_with_names.csv' % (self.nb_name_stem, prompt.index + 1))
-            print "Writing poll results for %s to %s" % (prompt.name, output_file)
+            print "Writing %s: poll results for %s" % (output_file, prompt.name)
 
             def user_response_text(username):
                 cells = [cell for cell in prompt.answers.get(username, [])
@@ -356,8 +359,6 @@ if __name__ == '__main__':
     repo_name = args.repo
     users_df = pd.read_csv(args.gh_users)
     users_df['Full Name'] = users_df['First Name'].map(str) + ' ' + users_df['Last Name']
-
-    # exit()
 
     valid_github_usernames = validate_github_usernames(users_df['gh_username'], repo_name)
     users_df['valid_github_repo'] = [u in valid_github_usernames for u in users_df['gh_username']]
