@@ -1,3 +1,5 @@
 github3.py>=0.9.4
 pandas>=0.17.1
 python-Levenshtein>=0.12.0
+jupyter>=1.0.0
+Flask>=0.10.1

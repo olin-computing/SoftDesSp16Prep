@@ -1,0 +1,14 @@
+@import url("//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.6/css/bootstrap.min.css");
+
+body { padding: 10pt; }
+
+h1 { margin-left: 90px; }
+
+#logo {
+  background: url("https://avatars0.githubusercontent.com/u/16786970?v=3&s=80");
+  background-position: bottom 5px center;
+  width: 80px;
+  height: 60px;
+  display: block;
+  position: absolute;
+}
