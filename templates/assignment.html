@@ -1,11 +1,16 @@
 {% extends "layout.html" %}
 {% block body %}
 
-  <a href="{{notebook_url}}#start-of-content"><h2>Notebook</h2></a>
-  <a href="{{url_for('processed_notebook', assignment_id=assignment.assignment_id)}}"><h2>Processed Notebook</h2></a>
+  <h2><a href="{{notebook_url}}#start-of-content">Notebook</a></h2>
+  <h2><a href="{{url_for('processed_notebook', assignment_id=assignment.assignment_id)}}">Processed Notebook</a></h2>
 
-  <h2>Tables</h2>
   {% for table in tables %}
+    <h2>{{ table[0] }}</h2>
+    {{ table[1] | safe }}
+  {% endfor %}
+
+  <h2>Polls</h2>
+  {% for table in polls %}
     <h3>{{ table[0] }}</h3>
     {{ table[1] | safe }}
   {% endfor %}

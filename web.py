@@ -37,10 +37,10 @@ for path in glob(os.path.join(SUMMARY_DIR, '*.csv')):
     if not m:
         continue
     assignment_id, summary_type = m.groups()
-    assignment_name = assignment_id.replace('day', 'day ').capitalize()
     df = pd.read_csv(path, index_col=0)
     assignment = assignments.get(assignment_id)
     if not assignment:
+        assignment_name = assignment_id.replace('day', 'day ').capitalize()
         assignment = Assignment(assignment_id, assignment_name, [], '%s_reading_journal.ipynb' % assignment_id)
         assignments[assignment_id] = assignment
     assignment[2].append((summary_type, df))
@@ -67,7 +67,9 @@ def assignment(assignment_id):
     def summary_type_to_title(s):
         return s.replace('_', ' ').capitalize()
     assignment = assignments[assignment_id]
-    tables = [(summary_type_to_title(summary_type), df.to_html(classes=DATAFRAME_TABLE_CLASSES))
+    tables = [(summary_type != 'response_counts',
+               summary_type_to_title(summary_type),
+               df.to_html(classes=DATAFRAME_TABLE_CLASSES))
               for summary_type, df in assignment[2]]
     return flask.render_template(
         'assignment.html',
@@ -75,7 +77,9 @@ def assignment(assignment_id):
         notebook_url='/'.join([GITHUB_REPO_URL, 'blob/master', assignment.notebook_name]),
         course_name=COURSE_NAME,
         title=assignment.name,
-        tables=tables)
+        tables=[(title, df) for is_poll, title, df in tables if not is_poll],
+        polls=[(title, df) for is_poll, title, df in tables if is_poll],
+        )
 
 
 @app.route('/assignment/<assignment_id>/processed')
