@@ -2,6 +2,7 @@
 
 import re
 import os
+from collections import namedtuple
 from glob import glob
 
 import flask
@@ -11,7 +12,7 @@ import nbformat
 import nbconvert
 import pandas as pd
 
-COURSE_NAME = 'SoftDes'
+COURSE_NAME = 'SoftDes Spring 2016'
 
 PROJECT_DIR = os.path.dirname(__file__)
 SUMMARY_DIR = os.path.join(PROJECT_DIR, 'summaries')
@@ -21,6 +22,9 @@ DATAFRAME_TABLE_CLASSES = 'table-condensed table-striped table-hover'
 RESPONSE_SUMMARY_PATH_TEMPLATE_RE = re.compile(
     r'(.+)_reading_journal_(.+)(?:responses|response_counts)?(?:_with_names).csv')
 
+GITHUB_REPO_URL = 'https://github.com/sd16spring/ReadingJournal'
+
+Assignment = namedtuple('Assignment', ['assignment_id', 'name', 'summaries', 'notebook_name'])
 
 app = Flask(__name__)
 
@@ -37,7 +41,7 @@ for path in glob(os.path.join(SUMMARY_DIR, '*.csv')):
     df = pd.read_csv(path, index_col=0)
     assignment = assignments.get(assignment_id)
     if not assignment:
-        assignment = (assignment_id, assignment_name, [])
+        assignment = Assignment(assignment_id, assignment_name, [], '%s_reading_journal.ipynb' % assignment_id)
         assignments[assignment_id] = assignment
     assignment[2].append((summary_type, df))
 
@@ -52,7 +56,8 @@ def natural_sort_key(s):
 def index():
     return flask.render_template(
         'index.html',
-        title=COURSE_NAME,
+        course_name=COURSE_NAME,
+        title='Assignments',
         assignments=sorted(assignments.values(), key=lambda t: natural_sort_key(t[1]))
     )
 
@@ -61,13 +66,15 @@ def index():
 def assignment(assignment_id):
     def summary_type_to_title(s):
         return s.replace('_', ' ').capitalize()
-    assignment_name = assignments[assignment_id][1]
+    assignment = assignments[assignment_id]
     tables = [(summary_type_to_title(summary_type), df.to_html(classes=DATAFRAME_TABLE_CLASSES))
-              for summary_type, df in assignments[assignment_id][2]]
+              for summary_type, df in assignment[2]]
     return flask.render_template(
         'assignment.html',
-        assignment_id=assignment_id,
-        title=COURSE_NAME + ' ' + assignment_name,
+        assignment=assignment,
+        notebook_url='/'.join([GITHUB_REPO_URL, 'blob/master', assignment.notebook_name]),
+        course_name=COURSE_NAME,
+        title=assignment.name,
         tables=tables)
 
 
@@ -77,8 +84,11 @@ def processed_notebook(assignment_id):
         nb = nbformat.reads(f.read(), as_version=4)
     str, _ = nbconvert.export_html(nb)
     assignment_name = assignments[assignment_id][1]
-    title = ' '.join([COURSE_NAME, assignment_name, 'Processed Notebook'])
-    return flask.render_template('processed_notebook.html', title=title, nb_html=str)
+    return flask.render_template(
+        'processed_notebook.html',
+        course_name=COURSE_NAME,
+        title=' '.join([assignment_name, 'Processed Notebook']),
+        nb_html=str)
 
 
 if __name__ == '__main__':
