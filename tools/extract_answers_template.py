@@ -87,6 +87,7 @@ class NotebookExtractor(object):
                     prompts[-1].stop_md = u''.join(cell['source'])
                 is_poll = metadata.get('is_poll', 'Reading Journal feedback' in cell['source'][0].split('\n')[0])
                 prompts.append(QuestionPrompt(question_heading=u"",
+                                              name=metadata.get('problem', None),
                                               index=len(prompts),
                                               start_md=u''.join(cell['source']),
                                               stop_md=u'next_cell',
@@ -212,7 +213,7 @@ class NotebookExtractor(object):
                 fp.write(html_content)
 
     def write_answer_counts(self):
-        output_file = os.path.join(SUMMARY_DIR, '%s_response_counts_with_names.csv' % self.nb_name_stem)
+        output_file = os.path.join(SUMMARY_DIR, '%s_response_counts.csv' % self.nb_name_stem)
 
         df = pd.DataFrame(
             data=[[u in prompt.answers for u in self.usernames] for prompt in self.question_prompts],
@@ -231,8 +232,8 @@ class NotebookExtractor(object):
     def write_poll_results(self):
         poll_questions = [prompt for prompt in self.question_prompts if prompt.is_poll]
         for prompt in poll_questions:
-            output_file = os.path.join(SUMMARY_DIR,
-                                       '%s_q%d_responses_with_names.csv' % (self.nb_name_stem, prompt.index + 1))
+            slug = prompt.name.replace(' ', '_').lower()
+            output_file = os.path.join(SUMMARY_DIR, '%s_%s.csv' % (self.nb_name_stem, slug))
             print "Writing %s: poll results for %s" % (output_file, prompt.name)
 
             def user_response_text(username):
@@ -252,7 +253,7 @@ class NotebookExtractor(object):
 
 
 class QuestionPrompt(object):
-    def __init__(self, question_heading, start_md, stop_md, index=None, is_poll=False, is_optional=None):
+    def __init__(self, question_heading, start_md, stop_md, name=None, index=None, is_poll=False, is_optional=None):
         """ Initialize a question prompt with the specified
             starting markdown (the question), and stopping
             markdown (the markdown from the next content
@@ -265,6 +266,7 @@ class QuestionPrompt(object):
         if is_optional is None and start_md:
             is_optional = bool(re.search(r'optional', start_md.split('\n')[0], re.I))
         self.question_heading = question_heading
+        self._name = name
         self.start_md = start_md
         self.stop_md = stop_md
         self.is_optional = is_optional
@@ -287,8 +289,8 @@ class QuestionPrompt(object):
     @property
     def name(self):
         m = re.match(r'^#+\s*(.+)\n', self.start_md)
-        if self.question_heading:
-            return self.question_heading
+        if self._name:
+            return self._name
         format_str = {
             (False, False): '',
             (False, True): '{title}',
