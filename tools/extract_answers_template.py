@@ -14,14 +14,20 @@ import urllib
 from collections import OrderedDict
 from copy import deepcopy
 from multiprocessing import Pool
+
 from numpy import argmin
 import Levenshtein
 import pandas as pd
 
+from disk_cache import disk_cache
+
 PROJECT_DIR = os.path.relpath(os.path.join(os.path.dirname(__file__), '..'))
 SUMMARY_DIR = os.path.join(PROJECT_DIR, 'summaries')
 
+use_disk_cache = False
 
+
+@disk_cache(active_fn=lambda: use_disk_cache, cache_dir=os.path.join(PROJECT_DIR, '_cache'))
 def read_json_from_url(url):
     """Given an URL, return its contents as JSON; or None if no JSON exists at that URL.
 
@@ -38,6 +44,11 @@ def read_json_from_url(url):
     finally:
         fid.close()
     return None
+
+
+def p_read_json_from_url(url):
+    """Shim for `p.map` to call `read_json_from_url`."""
+    return read_json_from_url(url)
 
 
 class NotebookExtractor(object):
@@ -95,7 +106,7 @@ class NotebookExtractor(object):
         p = Pool(20)  # HTTP fetch parallelism. This number is empirically good.
         print "Fetching %d notebooks..." % self.users_df['notebook_urls'].count()
         return dict(zip(self.users_df['gh_username'],
-                        p.map(read_json_from_url, self.users_df['notebook_urls'])))
+                        p.map(p_read_json_from_url, self.users_df['notebook_urls'])))
 
     def gh_username_to_fullname(self, gh_username):
         return self.users_df[users_df['gh_username'] == gh_username]['Full Name'].iloc[0]
@@ -213,6 +224,7 @@ class NotebookExtractor(object):
                 data=[user_response_text(username) for username in self.usernames],
                 columns=['Response'])
             df.index.name = 'Student'
+            df.sort_index(axis=1, inplace=True)
             df = df[df['Response'] != '']
 
             df.to_csv(output_file)
@@ -320,6 +332,7 @@ def validate_github_username(gh_name):
     return gh_name if 200 <= fid.getcode() <= 299 else None
 
 
+@disk_cache(active_fn=lambda: use_disk_cache, cache_dir=os.path.join(PROJECT_DIR, '_cache'))
 def validate_github_usernames(gh_usernames, repo_name):
     """Returns a set of valid github usernames.
 
@@ -350,12 +363,14 @@ def get_github_user_notebook_url(gh_username, template_nb_path, repo_name):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Summarize a set of Jupyter notebooks.')
+    parser.add_argument('--use-disk-cache', action='store_true')
     parser.add_argument('--repo', type=str, default='ReadingJournal', help='Github repository name')
     parser.add_argument('--include-usernames', action='store_true', help='include user names in the summary notebook')
     parser.add_argument('gh_users', type=str, metavar='GH_USERNAME_CSV_FILE')
     parser.add_argument('template_notebook', type=str, metavar='JUPYTER_NOTEBOOK_FILE')
     args = parser.parse_args()
 
+    use_disk_cache = args.use_disk_cache
     repo_name = args.repo
     users_df = pd.read_csv(args.gh_users)
     users_df['Full Name'] = users_df['First Name'].map(str) + ' ' + users_df['Last Name']
