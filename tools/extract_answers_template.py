@@ -28,10 +28,11 @@ PROJECT_DIR = os.path.relpath(os.path.join(os.path.dirname(__file__), '..'))
 PROCESSED_NOTEBOOK_DIR = os.path.join(PROJECT_DIR, "processed_notebooks")
 SUMMARY_DIR = os.path.join(PROJECT_DIR, 'summaries')
 
-use_disk_cache = False
+CACHE_DIR = os.path.join(PROJECT_DIR, '_cache')
+use_disk_cache = False  # the --use-disk-cache CLI arg sets this
 
 
-@disk_cache(active_fn=lambda: use_disk_cache, cache_dir=os.path.join(PROJECT_DIR, '_cache'))
+@disk_cache(active_fn=lambda: use_disk_cache, cache_dir=CACHE_DIR)
 def read_json_from_url(url):
     """Given an URL, return its contents as JSON; or None if no JSON exists at that URL.
 
@@ -83,13 +84,14 @@ class NotebookExtractor(object):
             is_final_cell = idx + 1 == len(self.template['cells'])
             metadata = cell['metadata']
             if metadata.get('is_question', False):
+                cell_source = ''.join(cell['source'])
                 if prev_prompt is not None:
-                    prompts[-1].stop_md = u''.join(cell['source'])
-                is_poll = metadata.get('is_poll', 'Reading Journal feedback' in cell['source'][0].split('\n')[0])
+                    prompts[-1].stop_md = cell_source
+                is_poll = metadata.get('is_poll', 'Reading Journal feedback' in cell_source.split('\n')[0])
                 prompts.append(QuestionPrompt(question_heading=u"",
                                               name=metadata.get('problem', None),
                                               index=len(prompts),
-                                              start_md=u''.join(cell['source']),
+                                              start_md=cell_source,
                                               stop_md=u'next_cell',
                                               is_optional=metadata.get('is_optional', None),
                                               is_poll=is_poll
@@ -150,6 +152,13 @@ class NotebookExtractor(object):
                     status = 'blank'
                 else:
                     status = 'answered'
+                    if not suppress_non_answer:
+                        # If it's the first notebook with this answer, extract the questions from it.
+                        # This is kind of a bass-ackwards way to do this; it's incremental from the previous
+                        # strategy.
+                        prompt.cells = [cell for cell in response_cells
+                                        if cell['metadata'].get('is_question', False)]
+                        response_cells = [cell for cell in response_cells if cell not in prompt.cells]
                     prompt.answers[gh_username] = response_cells
                 prompt.answer_status[gh_username] = status
 
@@ -185,19 +194,16 @@ class NotebookExtractor(object):
 
         filtered_cells = []
         for prompt in self.question_prompts:
+            filtered_cells += prompt.cells
             answers = prompt.answers_without_duplicates if remove_duplicate_answers else prompt.answers
             for gh_username, response_cells in answers.items():
                 if self.include_usernames:
                     filtered_cells.append(
                         NotebookUtils.markdown_heading_cell(self.gh_username_to_fullname(gh_username), 4))
                 filtered_cells.extend(response_cells)
+
         answer_book = deepcopy(self.template)
         answer_book['cells'] = filtered_cells
-        # if 'title' not in answer_book['metadata']:
-        #     title = re.sub(r'(day)(\d)', '\1 \2', self.nb_name_stem)
-        #     title = re.sub(r'_', ' ', title)
-        #     answer_book['metadata']['title'] = title
-
         nb = nbformat.from_dict(answer_book)
 
         print "Writing", output_file
@@ -237,9 +243,7 @@ class NotebookExtractor(object):
             print "Writing %s: poll results for %s" % (output_file, prompt.name)
 
             def user_response_text(username):
-                cells = [cell for cell in prompt.answers.get(username, [])
-                         if not cell['metadata'].get('is_question', False)]
-                return NotebookUtils.cell_list_text(cells)
+                return NotebookUtils.cell_list_text(prompt.answers.get(username, []))
 
             df = pd.DataFrame(
                 index=[self.gh_username_to_fullname(name) for name in self.usernames],
@@ -273,6 +277,7 @@ class QuestionPrompt(object):
         self.is_poll = is_poll
         self.index = index
         self.answers = OrderedDict()
+        self.cells = []
 
     @property
     def answers_without_duplicates(self):
@@ -355,7 +360,7 @@ def validate_github_username(gh_name):
     return gh_name if 200 <= fid.getcode() <= 299 else None
 
 
-@disk_cache(active_fn=lambda: use_disk_cache, cache_dir=os.path.join(PROJECT_DIR, '_cache'))
+@disk_cache(active_fn=lambda: use_disk_cache, cache_dir=CACHE_DIR)
 def validate_github_usernames(gh_usernames, repo_name):
     """Returns a set of valid github usernames.
 
