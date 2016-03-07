@@ -6,6 +6,7 @@
 """
 
 import argparse
+import io
 import json
 import os
 import re
@@ -15,13 +16,16 @@ from collections import OrderedDict
 from copy import deepcopy
 from multiprocessing import Pool
 
-from numpy import argmin
 import Levenshtein
 import pandas as pd
+import nbformat
+import nbconvert
+from numpy import argmin
 
 from disk_cache import disk_cache
 
 PROJECT_DIR = os.path.relpath(os.path.join(os.path.dirname(__file__), '..'))
+PROCESSED_NOTEBOOK_DIR = os.path.join(PROJECT_DIR, "processed_notebooks")
 SUMMARY_DIR = os.path.join(PROJECT_DIR, 'summaries')
 
 use_disk_cache = False
@@ -170,9 +174,12 @@ class NotebookExtractor(object):
                     prompt_name=prompt.name,
                     username=self.gh_username_to_fullname(username))
 
-    def write_notebook(self):
+    def write_notebook(self, include_html=True):
         suffix = "_responses_with_names" if self.include_usernames else "_responses"
-        output_file = os.path.join(PROJECT_DIR, "processed_notebooks", self.nb_name_stem + suffix + ".ipynb")
+        nb_name = self.nb_name_stem + suffix
+        output_file = os.path.join(PROCESSED_NOTEBOOK_DIR, nb_name + '.ipynb')
+        html_output = os.path.join(PROCESSED_NOTEBOOK_DIR, nb_name + '.html')
+
         remove_duplicate_answers = not self.include_usernames
 
         filtered_cells = []
@@ -185,10 +192,24 @@ class NotebookExtractor(object):
                 filtered_cells.extend(response_cells)
         answer_book = deepcopy(self.template)
         answer_book['cells'] = filtered_cells
+        # if 'title' not in answer_book['metadata']:
+        #     title = re.sub(r'(day)(\d)', '\1 \2', self.nb_name_stem)
+        #     title = re.sub(r'_', ' ', title)
+        #     answer_book['metadata']['title'] = title
+
+        nb = nbformat.from_dict(answer_book)
 
         print "Writing", output_file
-        with open(output_file, 'wt') as fid:
-            json.dump(answer_book, fid, indent=2, sort_keys=True)
+        with io.open(output_file, 'wt') as fp:
+            nbformat.write(nb, fp, version=4)
+
+        if include_html:
+            # TODO why is the following necessary?
+            nb = nbformat.reads(nbformat.writes(nb, version=4), as_version=4)
+            html_content, _ = nbconvert.export_html(nb)
+            print "Writing", html_output
+            with io.open(html_output, 'w') as fp:
+                fp.write(html_content)
 
     def write_answer_counts(self):
         output_file = os.path.join(SUMMARY_DIR, '%s_response_counts_with_names.csv' % self.nb_name_stem)
@@ -366,6 +387,7 @@ if __name__ == '__main__':
     parser.add_argument('--use-disk-cache', action='store_true')
     parser.add_argument('--repo', type=str, default='ReadingJournal', help='Github repository name')
     parser.add_argument('--include-usernames', action='store_true', help='include user names in the summary notebook')
+    parser.add_argument('--html-output', action='store_true', help='write an HTML copy of the summary notebook')
     parser.add_argument('gh_users', type=str, metavar='GH_USERNAME_CSV_FILE')
     parser.add_argument('template_notebook', type=str, metavar='JUPYTER_NOTEBOOK_FILE')
     args = parser.parse_args()
@@ -384,6 +406,6 @@ if __name__ == '__main__':
     nbe = NotebookExtractor(users_df, template_nb_path, include_usernames=args.include_usernames)
     nbe.extract()
     nbe.report_missing_answers()
-    nbe.write_notebook()
+    nbe.write_notebook(include_html=args.html_output)
     nbe.write_poll_results()
     nbe.write_answer_counts()
