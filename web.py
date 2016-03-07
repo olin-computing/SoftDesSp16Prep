@@ -20,7 +20,7 @@ SUMMARY_DIR = os.path.join(PROJECT_DIR, 'summaries')
 DATAFRAME_TABLE_CLASSES = 'table-condensed table-striped table-hover'
 
 RESPONSE_SUMMARY_PATH_TEMPLATE_RE = re.compile(
-    r'(.+)_reading_journal_(.+)(?:responses|response_counts)?(?:_with_names).csv')
+    r'(.+)_reading_journal_(.+)(?:responses|response_counts)?(?:_with_names)?.csv')
 
 GITHUB_REPO_URL = 'https://github.com/sd16spring/ReadingJournal'
 
