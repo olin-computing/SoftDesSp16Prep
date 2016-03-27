@@ -1,0 +1,10 @@
+{% extends "layout.html" %}
+{% block body %}
+
+  <ul>
+  {% for assignment in assignments %}
+    <li><a href="{{url_for('assignment', assignment_id=assignment[0])}}">{{assignment[1]}}</a></li>
+  {% endfor %}
+  </ul>
+
+{% endblock %}

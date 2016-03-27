@@ -23,6 +23,15 @@ of each pull request.
 
 This command assumes there only pull request per repository.
 
+## Notebook Metadata
+
+These Jupyter cell metadata fields are meaningful:
+
+* `is_question`: anchor for finding answers in student notebooks
+* `is_optional`: don't list students who didn't answer this
+* `is_poll`: don't eliminate duplicates answers, or list students who didn't answer
+* `allow_multi_cell`
+
 ## Install
 
     pip install -r requirements.txt

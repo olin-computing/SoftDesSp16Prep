@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% block body %}
+
+  <a href="{{url_for('processed_notebook', assignment_id=assignment_id)}}">Processed Notebook</a>
+
+  {% for table in tables %}
+    <h2>{{ table[0] }}</h2>
+    {{ table[1] | safe }}
+  {% endfor %}
+
+{% endblock %}
